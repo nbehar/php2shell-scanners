@@ -2,3 +2,5 @@
 *.swp
 *~
 nuclei/
+__pycache__/
+*.py[cod]

@@ -14,16 +14,16 @@ with Nmap. It does not require any file outside this folder.
 ## Run
 
     nmap -sV -p 80,443 \
-      --script ./php2shell-exposure.nse \
-      --script-args 'php2shell.path=/index.php' \
+      --script ./http-vuln-php2shell.nse \
+      --script-args 'http-vuln-php2shell.path=/index.php' \
       TARGET
 
 On a nonstandard port that Nmap labels unknown, force the script with a leading
 plus sign:
 
     nmap -Pn -p 8080 \
-      --script +./php2shell-exposure.nse \
-      --script-args 'php2shell.path=/index.php' \
+      --script +./http-vuln-php2shell.nse \
+      --script-args 'http-vuln-php2shell.path=/index.php' \
       TARGET
 
 The path must start with one slash. Redirects are not followed.

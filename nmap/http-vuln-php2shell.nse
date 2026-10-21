@@ -1,5 +1,3 @@
--- Standalone release: copy this file to any location and invoke it with
--- Nmap. It uses only NSE libraries bundled with a standard Nmap install.
 description = [[
 Reports likely PHP2Shell exposure (CVE-2026-109618 and CVE-2026-109619)
 when an HTTP response discloses a PHP runtime version below the first upstream
@@ -11,41 +9,76 @@ The first upstream fixed releases are PHP 8.2.35, 8.3.36, 8.4.27, and 8.5.12.
 Older vendor packages may contain backported fixes without changing the
 upstream version shown in an HTTP header.
 
-Use --script-args php2shell.path=/path/to/a/php/page to inspect a specific page.
-No output means no below-fix PHP version was disclosed; it does not establish
-that the serving runtime is patched.
+PHP 7.4, 8.0, and 8.1 are end-of-life upstream branches for which PHP published
+minimal source backports. Older branches are not assessed by this script.
+
+Use --script-args http-vuln-php2shell.path=/path/to/a/php/page to inspect a
+specific page. No output means no affected version was disclosed; it does not
+establish that the serving runtime is patched.
 ]]
 
 ---
--- @args php2shell.path Origin-relative path to request. Defaults to
+-- @args http-vuln-php2shell.path Origin-relative path to request. Defaults to
 -- <code>/</code>.
 --
 -- @usage
--- nmap -sV -p 80,443 --script ./php2shell-exposure.nse \
---   --script-args 'php2shell.path=/index.php' <target>
+-- nmap -sV -p 80,443 --script http-vuln-php2shell \
+--   --script-args 'http-vuln-php2shell.path=/index.php' <target>
 --
 -- @output
--- | php2shell-exposure:
+-- | http-vuln-php2shell:
 -- |   VULNERABLE:
--- |   PHP2Shell potential exposure by disclosed PHP version
+-- |   PHP RCE via OOM corruption
 -- |     State: LIKELY VULNERABLE
 -- |     IDs:  CVE:CVE-2026-109618
 -- |     Risk factor: High
--- |       The response disclosed a PHP version below the first upstream fixed
--- |       release. Banner evidence alone cannot confirm either vulnerability.
+-- |       PHP can leave request memory in an invalid state when an allocation
+-- |       fails in certain contexts. Request shutdown can then process the
+-- |       invalid state and lead to remote code execution.
+-- |
+-- |       The response disclosed a PHP version in the published affected
+-- |       range. Banner evidence can be stale, spoofed, supplied by a proxy,
+-- |       or describe a different runtime, so this result does not confirm the
+-- |       vulnerability.
+-- |
+-- |     Disclosure date: 2026-10-21
 -- |     Check results:
--- |       request_path=/index.php
+-- |       request_path=/vulnerable
 -- |       http_status=200
 -- |       evidence[1].header_source=X-Powered-By
--- |       evidence[1].raw_version=8.5.11-1+deb12u1
--- |       evidence[1].assessment=below upstream fix 8.5.12
+-- |       evidence[1].raw_version=8.4.26
+-- |       evidence[1].assessment=below upstream fix 8.4.27
+-- |     Extra information:
+-- |       Vendor packages may backport fixes without changing the disclosed
+-- |       upstream version; verify the serving runtime and package provenance.
+-- |
+-- |   PHP RCE via stale global state
+-- |     State: LIKELY VULNERABLE
+-- |     IDs:  CVE:CVE-2026-109619
+-- |     Risk factor: High
+-- |       PHP request-owned state can survive after its backing memory is
+-- |       freed. A later request handled by the same worker can consume that
+-- |       stale state and lead to remote code execution.
+-- |
+-- |       The response disclosed a PHP version in the published affected
+-- |       range. Banner evidence can be stale, spoofed, supplied by a proxy,
+-- |       or describe a different runtime, so this result does not confirm the
+-- |       vulnerability.
+-- |
+-- |     Disclosure date: 2026-10-21
+-- |     Check results:
+-- |       request_path=/vulnerable
+-- |       http_status=200
+-- |       evidence[1].header_source=X-Powered-By
+-- |       evidence[1].raw_version=8.4.26
+-- |       evidence[1].assessment=below upstream fix 8.4.27
 -- |     Extra information:
 -- |_      Vendor packages may backport fixes without changing the disclosed
 -- |       upstream version; verify the serving runtime and package provenance.
 
 author = "nbehar"
 license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
-categories = {"safe", "vuln"}
+categories = { "safe", "vuln" }
 
 local http = require "http"
 local shortport = require "shortport"
@@ -59,6 +92,42 @@ local FIXED_RELEASES = {
   [3] = { patch = 36, version = "8.3.36" },
   [4] = { patch = 27, version = "8.4.27" },
   [5] = { patch = 12, version = "8.5.12" }
+}
+
+local END_OF_LIFE_AFFECTED_BRANCHES = {
+  ["7.4"] = true,
+  ["8.0"] = true,
+  ["8.1"] = true
+}
+
+local PHP_ANNOUNCEMENT =
+  "https://www.php.net/archive/2026.php#2026-10-21-5"
+
+local VULNERABILITIES = {
+  {
+    title = "PHP RCE via OOM corruption",
+    cve = "CVE-2026-109618",
+    advisory =
+      "https://github.com/php/php-src/security/advisories/" ..
+      "GHSA-w8hw-w9fx-j79w",
+    description = [[
+PHP can leave request memory in an invalid state when an allocation fails in
+certain contexts. Request shutdown can then process the invalid state and lead
+to remote code execution.
+]]
+  },
+  {
+    title = "PHP RCE via stale global state",
+    cve = "CVE-2026-109619",
+    advisory =
+      "https://github.com/php/php-src/security/advisories/" ..
+      "GHSA-6wmf-4rv5-p3rp",
+    description = [[
+PHP request-owned state can survive after its backing memory is freed. A later
+request handled by the same worker can consume that stale state and lead to
+remote code execution.
+]]
+  }
 }
 
 local BACKPORT_CAVEAT =
@@ -83,12 +152,9 @@ local function classify(raw_version)
   major, minor, patch = tonumber(major), tonumber(minor), tonumber(patch)
   local prerelease = is_prerelease(suffix)
 
-  if major < 5 or (major == 5 and minor < 4) then
-    return false, "outside the published affected-version range"
-  end
-
-  if major < 8 or (major == 8 and minor < 2) then
-    return true, "end-of-life upstream branch; verify vendor backports"
+  local branch = string.format("%d.%d", major, minor)
+  if END_OF_LIFE_AFFECTED_BRANCHES[branch] then
+    return true, "affected end-of-life branch; verify vendor backports"
   end
 
   if major == 8 and FIXED_RELEASES[minor] then
@@ -106,6 +172,38 @@ local function classify(raw_version)
   end
 
   return false, "branch outside the published fixed-release matrix"
+end
+
+local function copy_list(values)
+  local copied = {}
+  for _, value in ipairs(values) do
+    copied[#copied + 1] = value
+  end
+  return copied
+end
+
+local function make_vulnerability(definition, check_results)
+  return {
+    title = definition.title,
+    state = vulns.STATE.LIKELY_VULN,
+    IDS = { CVE = definition.cve },
+    risk_factor = "High",
+    dates = {
+      disclosure = { year = 2026, month = 10, day = 21 }
+    },
+    description = definition.description .. [[
+
+The response disclosed a PHP version in the published affected range. Banner
+evidence can be stale, spoofed, supplied by a proxy, or describe a different
+runtime, so this result does not confirm the vulnerability.
+]],
+    check_results = copy_list(check_results),
+    extra_info = { BACKPORT_CAVEAT },
+    references = {
+      definition.advisory,
+      PHP_ANNOUNCEMENT
+    }
+  }
 end
 
 local function collect_versions(response)
@@ -149,11 +247,11 @@ local function collect_versions(response)
 end
 
 action = function(host, port)
-  local path = stdnse.get_script_args("php2shell.path") or "/"
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
   if type(path) ~= "string" or path:sub(1, 1) ~= "/" or
     path:sub(1, 2) == "//" or path:find("[\r\n]") then
-    return "php2shell.path must be an origin-relative path beginning with " ..
-      "one / and must not contain CR or LF"
+    return SCRIPT_NAME .. ".path must be an origin-relative path beginning " ..
+      "with one / and must not contain CR or LF"
   end
 
   local response = http.get(host, port, path, {
@@ -191,28 +289,9 @@ action = function(host, port)
       prefix .. "assessment=" .. observation.assessment
   end
 
-  local vulnerability = {
-    title = "PHP2Shell potential exposure by disclosed PHP version",
-    state = vulns.STATE.LIKELY_VULN,
-    IDS = { CVE = "CVE-2026-109618" },
-    risk_factor = "High",
-    dates = {
-      disclosure = { year = 2026, month = 10, day = 21 }
-    },
-    description = [[
-The response disclosed a PHP version below the first upstream fixed release for
-CVE-2026-109618 and CVE-2026-109619. Banner evidence can be stale, spoofed,
-supplied by a proxy, or describe a different runtime, so this result does not
-confirm either vulnerability.
-]],
-    check_results = check_results,
-    extra_info = { BACKPORT_CAVEAT },
-    references = {
-      "https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w",
-      "https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp"
-    }
-  }
-
   local report = vulns.Report:new(SCRIPT_NAME, host, port)
-  return report:make_output(vulnerability)
+  return report:make_output(
+    make_vulnerability(VULNERABILITIES[1], check_results),
+    make_vulnerability(VULNERABILITIES[2], check_results)
+  )
 end

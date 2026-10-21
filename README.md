@@ -6,7 +6,7 @@ formats:
 
 | Scanner | File | Runtime |
 | --- | --- | --- |
-| Nmap NSE | [`nmap/php2shell-exposure.nse`](nmap/php2shell-exposure.nse) | Nmap |
+| Nmap NSE | [`nmap/http-vuln-php2shell.nse`](nmap/http-vuln-php2shell.nse) | Nmap |
 | Bash | [`bash/php2shell-exposure.sh`](bash/php2shell-exposure.sh) | Bash, curl, and awk |
 
 The scanners send one HTTP GET request and inspect `X-Powered-By` and `Server`
@@ -27,8 +27,8 @@ Use the Nmap script:
 
 ```sh
 nmap -sV -p 80,443 \
-  --script ./nmap/php2shell-exposure.nse \
-  --script-args 'php2shell.path=/index.php' \
+  --script ./nmap/http-vuln-php2shell.nse \
+  --script-args 'http-vuln-php2shell.path=/index.php' \
   TARGET
 ```
 
@@ -43,10 +43,11 @@ Each scanner has a more detailed README in its directory.
 ## Validate locally
 
 ```sh
-nmap --script-help ./nmap/php2shell-exposure.nse
-luac -p ./nmap/php2shell-exposure.nse
+nmap --script-help ./nmap/http-vuln-php2shell.nse
+luac -p ./nmap/http-vuln-php2shell.nse
 shellcheck ./bash/php2shell-exposure.sh
 bash -n ./bash/php2shell-exposure.sh
+./tests/test-nse.sh
 ```
 
 ## Submit the NSE script to Nmap
@@ -57,9 +58,7 @@ authoritative Subversion repository.
 1. Fork [`nmap/nmap`](https://github.com/nmap/nmap) on GitHub and clone the
    fork.
 2. Create a branch from the latest `master` branch.
-3. Copy `nmap/php2shell-exposure.nse` into the fork's `scripts/` directory.
-   Ask the maintainers in the pull request whether they prefer the current
-   name or an `http-vuln-*` name; renaming changes the script-argument prefix.
+3. Copy `nmap/http-vuln-php2shell.nse` into the fork's `scripts/` directory.
 4. Run the checks above with the script in the Nmap source tree. Test against
    controlled endpoints that return an affected version, a fixed version, no
    PHP version, duplicate headers, and a vendor-suffixed version.
