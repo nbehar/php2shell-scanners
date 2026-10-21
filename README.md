@@ -1,13 +1,12 @@
 # PHP2Shell scanners
 
 Banner-based checks for potential exposure to CVE-2026-109618 and
-CVE-2026-109619. The repository provides the same low-impact check in three
+CVE-2026-109619. The repository provides the same low-impact check in two
 formats:
 
 | Scanner | File | Runtime |
 | --- | --- | --- |
 | Nmap NSE | [`nmap/php2shell-exposure.nse`](nmap/php2shell-exposure.nse) | Nmap |
-| Nuclei | [`nuclei/php2shell-exposure.yaml`](nuclei/php2shell-exposure.yaml) | Nuclei v3 |
 | Bash | [`bash/php2shell-exposure.sh`](bash/php2shell-exposure.sh) | Bash, curl, and awk |
 
 The scanners send one HTTP GET request and inspect `X-Powered-By` and `Server`
@@ -33,15 +32,6 @@ nmap -sV -p 80,443 \
   TARGET
 ```
 
-Use the Nuclei template:
-
-```sh
-nuclei \
-  -u https://TARGET/index.php \
-  -t ./nuclei/php2shell-exposure.yaml \
-  -disable-update-check
-```
-
 Use the Bash scanner:
 
 ```sh
@@ -57,9 +47,6 @@ nmap --script-help ./nmap/php2shell-exposure.nse
 luac -p ./nmap/php2shell-exposure.nse
 shellcheck ./bash/php2shell-exposure.sh
 bash -n ./bash/php2shell-exposure.sh
-nuclei -validate \
-  -t ./nuclei/php2shell-exposure.yaml \
-  -disable-update-check
 ```
 
 ## Submit the NSE script to Nmap
